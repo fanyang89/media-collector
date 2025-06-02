@@ -97,7 +97,7 @@ var RootCmd = &cli.Command{
 			}
 		}
 
-		return nil
+		return client.ClearToView()
 	},
 }
 
