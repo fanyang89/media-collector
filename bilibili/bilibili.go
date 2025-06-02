@@ -29,14 +29,14 @@ var RootCmd = &cli.Command{
 	Aliases: []string{"bili", "b"},
 	Flags: []cli.Flag{
 		&cli.StringFlag{
-			Name:     "config",
-			Aliases:  []string{"c"},
-			Required: true,
+			Name:    "config",
+			Aliases: []string{"c"},
+			Value:   "config.yml",
 		},
 		&cli.StringFlag{
-			Name:     "output",
-			Aliases:  []string{"o"},
-			Required: true,
+			Name:    "output",
+			Aliases: []string{"o"},
+			Value:   "./output",
 		},
 	},
 	Action: func(ctx context.Context, command *cli.Command) error {
