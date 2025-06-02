@@ -1,0 +1,7 @@
+version: '3'
+
+tasks:
+  tools:
+    cmds:
+      - go install github.com/playwright-community/playwright-go/cmd/playwright@v0.5200.0
+      - playwright install --with-deps
