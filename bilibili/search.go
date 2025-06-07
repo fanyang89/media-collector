@@ -77,6 +77,15 @@ var downloadSearchCmd = &cli.Command{
 							zap.String("title", r.Title))
 						continue
 					}
+
+					ok, err := d.history.IsDownloaded(r.Bvid)
+					if err != nil {
+						return err
+					}
+					if ok {
+						continue
+					}
+
 					if maxDuration <= time.Duration(0) {
 						results = append(results, r)
 					} else if r.Duration <= maxDuration {
@@ -102,7 +111,8 @@ var downloadSearchCmd = &cli.Command{
 				Tags:          r.Tags,
 			}, false)
 			if err != nil {
-				return err
+				zap.L().Error("Download failed", zap.String("bvid", r.Bvid), zap.Error(err))
+				continue
 			}
 		}
 
