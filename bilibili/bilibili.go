@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
@@ -68,7 +69,152 @@ var downloadCmd = &cli.Command{
 	Name: "download",
 	Commands: []*cli.Command{
 		downloadToViewCmd,
+		downloadSingleCmd,
 	},
+}
+
+type downloader struct {
+	ffmpeg     FFmpeg
+	outputPath string
+	client     *bilibili.Client
+}
+
+func newDownloader(ffmpegPath string, outputPath, configPath string) (*downloader, error) {
+	d := &downloader{}
+
+	_, err := os.Stat(ffmpegPath)
+	if err != nil {
+		return nil, errors.Wrap(err, "ffmpeg not exist, please install ffmpeg first")
+	}
+	d.ffmpeg = FFmpeg{Path: ffmpegPath}
+
+	_, err = os.Stat(outputPath)
+	if err != nil && os.IsNotExist(err) {
+		err = os.Mkdir(outputPath, 0755)
+		if err != nil {
+			return nil, err
+		}
+	}
+	d.outputPath = outputPath
+
+	config, err := LoadConfig(configPath)
+	if err != nil {
+		return nil, err
+	}
+	if config.Cookies == "" {
+		return nil, errors.New("please login first")
+	}
+
+	d.client = bilibili.New()
+	d.client.SetCookiesString(config.Cookies)
+	return d, nil
+}
+
+func convertAidToBvid(aid int) string {
+	const base58CharTable = "fZodR9XQDSUm21yCkr6zBqiveYah8bt4xsWpHnJE7jL5VG3guMTKNPAwcF"
+	const xorN = 177451812
+	const addN = 8728348608
+	s := []int{11, 10, 3, 8, 4, 6}
+	z := (aid ^ xorN) + addN
+	l := []rune("BV1  4 1 7  ")
+	for i, c := range s {
+		n := int(math.Floor(float64(z)/(math.Pow(58, float64(i))))) % 58
+		l[c] = rune(base58CharTable[n])
+	}
+	return string(l)
+}
+
+var downloadSingleCmd = &cli.Command{
+	Name: "single",
+	Flags: []cli.Flag{
+		&cli.StringFlag{Name: "bvid"}, &cli.IntFlag{Name: "aid"},
+		&cli.StringFlag{
+			Name:    "config",
+			Aliases: []string{"c"},
+			Value:   "config.yml",
+		},
+		&cli.StringFlag{
+			Name:    "output",
+			Aliases: []string{"o"},
+			Value:   "./output",
+		},
+		&cli.StringFlag{
+			Name:  "ffmpeg",
+			Value: "ffmpeg" + defaultExecutableFileExtension(),
+		},
+	},
+	Action: func(ctx context.Context, command *cli.Command) error {
+		bvid := command.String("bvid")
+		aid := command.Int("aid")
+		if bvid == "" && aid == 0 {
+			return errors.New("bvid/aid is required")
+		}
+		if aid != 0 {
+			bvid = convertAidToBvid(aid)
+		}
+
+		ffmpegPath := command.String("ffmpeg")
+		outputPath := command.String("output")
+		configPath := command.String("config")
+
+		downloader, err := newDownloader(ffmpegPath, outputPath, configPath)
+		if err != nil {
+			return err
+		}
+
+		client := downloader.client
+		videoInfo, err := client.GetVideoInfo(bilibili.VideoParam{Bvid: bvid})
+		if err != nil {
+			return err
+		}
+		outputFile := newFileName(videoInfo.Owner.Name, videoInfo.Title, "", "mp4")
+
+		result, err := client.GetVideoStream(newGetVideoStreamParam(bvid, videoInfo.Cid))
+		if err != nil {
+			return err
+		}
+		if len(result.Dash.Video) == 0 || len(result.Dash.Audio) == 0 {
+			zap.L().Error("Can't get video stream", zap.Int("cid", videoInfo.Cid),
+				zap.String("title", videoInfo.Title), zap.String("owner", videoInfo.Owner.Name))
+		}
+
+		slices.SortFunc(result.Dash.Video, func(a, b bilibili.AudioOrVideo) int { return b.Bandwidth - a.Bandwidth })
+		slices.SortFunc(result.Dash.Audio, func(a, b bilibili.AudioOrVideo) int { return b.Bandwidth - a.Bandwidth })
+
+		video := result.Dash.Video[0]
+		videoPath := filepath.Join(outputPath, newFileName(videoInfo.Owner.Name, videoInfo.Title, "video", video.MimeType))
+		err = downloadFile(client, videoPath, append([]string{video.BaseUrl}, video.BackupUrl...))
+		if err != nil {
+			return err
+		}
+
+		audio := result.Dash.Audio[0]
+		audioPath := filepath.Join(outputPath, newFileName(videoInfo.Owner.Name, videoInfo.Title, "audio", audio.MimeType))
+		err = downloadFile(client, audioPath, append([]string{audio.BaseUrl}, audio.BackupUrl...))
+		if err != nil {
+			return err
+		}
+
+		zap.L().Info("Merging", zap.String("output", outputFile))
+		ffmpeg := downloader.ffmpeg
+		err = ffmpeg.MergeVideoAudio(videoPath, audioPath, filepath.Join(outputPath, outputFile))
+		if err != nil {
+			return err
+		}
+		_ = os.Remove(videoPath)
+		_ = os.Remove(audioPath)
+
+		return nil
+	},
+}
+
+func newGetVideoStreamParam(bvid string, cid int) bilibili.GetVideoStreamParam {
+	return bilibili.GetVideoStreamParam{
+		Bvid:     bvid,
+		Cid:      cid,
+		Platform: "pc",
+		Fnval:    16,
+	}
 }
 
 var downloadToViewCmd = &cli.Command{
@@ -91,42 +237,16 @@ var downloadToViewCmd = &cli.Command{
 	},
 	Action: func(ctx context.Context, command *cli.Command) error {
 		ffmpegPath := command.String("ffmpeg")
-		_, err := os.Stat(ffmpegPath)
-		if err != nil {
-			return errors.Wrap(err, "ffmpeg not exist, please install ffmpeg first")
-		}
-
 		outputPath := command.String("output")
-		_, err = os.Stat(outputPath)
-		if err != nil && os.IsNotExist(err) {
-			err = os.Mkdir(outputPath, 0755)
-			if err != nil {
-				return err
-			}
-		}
-
 		configPath := command.String("config")
-		config, err := LoadConfig(configPath)
+
+		downloader, err := newDownloader(ffmpegPath, outputPath, configPath)
 		if err != nil {
 			return err
 		}
 
-		client := bilibili.New()
-
-		if config.Cookies != "" {
-			client.SetCookiesString(config.Cookies)
-		} else {
-			c, err := Login(client)
-			if err != nil {
-				return err
-			}
-
-			config.Cookies = c
-			err = SaveConfig(configPath, config)
-			if err != nil {
-				return err
-			}
-		}
+		client := downloader.client
+		ffmpeg := downloader.ffmpeg
 
 		toViewList, err := client.GetToViewList()
 		if err != nil {
@@ -136,20 +256,14 @@ var downloadToViewCmd = &cli.Command{
 		mergeList := make([]VideoAudioPair, 0)
 
 		for _, v := range toViewList.List {
-			cid := v.Cid
-			result, err := client.GetVideoStream(bilibili.GetVideoStreamParam{
-				Bvid:     v.Bvid,
-				Cid:      cid,
-				Platform: "pc",
-				Fnval:    16,
-			})
+			result, err := client.GetVideoStream(newGetVideoStreamParam(v.Bvid, v.Cid))
 			if err != nil {
 				return err
 			}
 
 			if len(result.Dash.Video) == 0 || len(result.Dash.Audio) == 0 {
-				zap.L().Error("Can't get video stream",
-					zap.Int("cid", cid), zap.String("title", v.Title), zap.String("owner", v.Owner.Name))
+				zap.L().Error("Can't get video stream", zap.Int("cid", v.Cid),
+					zap.String("title", v.Title), zap.String("owner", v.Owner.Name))
 				continue
 			}
 
@@ -181,7 +295,6 @@ var downloadToViewCmd = &cli.Command{
 			})
 		}
 
-		ffmpeg := FFmpeg{Path: ffmpegPath}
 		for _, m := range mergeList {
 			zap.L().Info("Merging", zap.String("output", filepath.Base(m.OutputPath)))
 			err = ffmpeg.MergeVideoAudio(m.VideoPath, m.AudioPath, m.OutputPath)
