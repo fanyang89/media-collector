@@ -72,6 +72,11 @@ var downloadSearchCmd = &cli.Command{
 				zap.L().Info("Search", zap.Int("page", page), zap.Int("count", len(result.Data)))
 				for _, m := range result.Data {
 					r := NewVideoSearchResult(m)
+					if r.IsPay {
+						zap.L().Info("Skip paid video", zap.String("bvid", r.Bvid),
+							zap.String("title", r.Title))
+						continue
+					}
 					if maxDuration <= time.Duration(0) {
 						results = append(results, r)
 					} else if r.Duration <= maxDuration {
@@ -111,6 +116,7 @@ type VideoSearchResult struct {
 	Title    string        `json:"title"`
 	Tags     []string      `json:"tags"`
 	Duration time.Duration `json:"duration"`
+	IsPay    bool          `json:"is_pay"`
 }
 
 func parseDuration(s string) time.Duration {
@@ -158,6 +164,7 @@ func NewVideoSearchResult(m map[string]any) *VideoSearchResult {
 		Title:    getInnerText(m["title"].(string)),
 		Tags:     strings.Split(m["tag"].(string), ","),
 		Duration: parseDuration(durationStr),
+		IsPay:    m["is_pay"].(float64) != 0,
 	}
 }
 
