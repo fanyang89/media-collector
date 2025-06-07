@@ -8,7 +8,8 @@ import (
 )
 
 var downloadSingleCmd = &cli.Command{
-	Name: "single",
+	Name:  "single",
+	Usage: "Download a single video by BVID/AID",
 	Flags: []cli.Flag{
 		&cli.StringFlag{Name: "bvid"}, &cli.IntFlag{Name: "aid"},
 		&cli.StringFlag{

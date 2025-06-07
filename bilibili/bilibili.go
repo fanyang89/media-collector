@@ -38,7 +38,8 @@ func defaultExecutableFileExtension() string {
 }
 
 var loginCmd = &cli.Command{
-	Name: "login",
+	Name:  "login",
+	Usage: "Login and save cookies",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:    "config",
@@ -65,7 +66,8 @@ var loginCmd = &cli.Command{
 }
 
 var downloadCmd = &cli.Command{
-	Name: "download",
+	Name:  "download",
+	Usage: "Download video",
 	Commands: []*cli.Command{
 		downloadToViewCmd,
 		downloadSingleCmd,
@@ -98,7 +100,8 @@ func newGetVideoStreamParam(bvid string, cid int) bilibili.GetVideoStreamParam {
 }
 
 var downloadToViewCmd = &cli.Command{
-	Name: "to-view",
+	Name:  "to-view",
+	Usage: "Download to-view (playback later) videos",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:    "config",
@@ -144,7 +147,8 @@ var downloadToViewCmd = &cli.Command{
 
 var RootCmd = &cli.Command{
 	Name:    "bilibili",
-	Aliases: []string{"bili", "b"},
+	Usage:   "Commands for Bilibili",
+	Aliases: []string{"b"},
 	Commands: []*cli.Command{
 		loginCmd,
 		downloadCmd,
