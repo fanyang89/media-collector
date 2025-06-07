@@ -188,7 +188,7 @@ func (d *downloader) downloadSingleFile(filePath string, url string) error {
 	body := rsp.RawBody()
 	defer func() { _ = body.Close() }()
 
-	_ = fmt.Sprintf("Downloading %s\n", fileName)
+	fmt.Printf("Downloading %s\n", fileName)
 	contentLength := getContentLength(rsp.Header())
 	if contentLength >= d.config.MaxFileSize {
 		zap.L().Warn("Skip large file", zap.String("file", fileName))
