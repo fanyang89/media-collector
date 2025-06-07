@@ -6,7 +6,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -15,14 +18,24 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/flytam/filenamify"
 	"github.com/go-resty/resty/v2"
-	"github.com/k0kubun/go-ansi"
-	"github.com/schollz/progressbar/v3"
 	"github.com/urfave/cli/v3"
 	"go.uber.org/zap"
-	"gopkg.in/yaml.v2"
 )
 
 const readStreamSliceTimeout = 30 * time.Second
+
+type VideoAudioPair struct {
+	VideoPath  string
+	AudioPath  string
+	OutputPath string
+}
+
+func defaultExecutableFileExtension() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
+}
 
 var RootCmd = &cli.Command{
 	Name:    "bilibili",
@@ -37,6 +50,10 @@ var RootCmd = &cli.Command{
 			Name:    "output",
 			Aliases: []string{"o"},
 			Value:   "./output",
+		},
+		&cli.StringFlag{
+			Name:  "ffmpeg",
+			Value: "ffmpeg" + defaultExecutableFileExtension(),
 		},
 	},
 	Action: func(ctx context.Context, command *cli.Command) error {
@@ -77,27 +94,66 @@ var RootCmd = &cli.Command{
 			return err
 		}
 
+		mergeList := make([]VideoAudioPair, 0)
+
 		for _, v := range toViewList.List {
 			cid := v.Cid
 			result, err := client.GetVideoStream(bilibili.GetVideoStreamParam{
-				Bvid:        v.Bvid,
-				Cid:         cid,
-				Platform:    "html5",
-				HighQuality: 1,
+				Bvid:     v.Bvid,
+				Cid:      cid,
+				Platform: "pc",
+				Fnval:    16,
 			})
 			if err != nil {
 				return err
 			}
-			for _, durl := range result.Durl {
-				fileName := newName(v.Owner.Name, v.Title, durl.Order, result.Format)
-				err = downloadFile(client, filepath.Join(outputPath, fileName), append([]string{durl.Url}, durl.BackupUrl...))
-				if err != nil {
-					return err
-				}
+
+			if len(result.Dash.Video) == 0 || len(result.Dash.Audio) == 0 {
+				zap.L().Error("Can't get video stream",
+					zap.Int("cid", cid), zap.String("title", v.Title), zap.String("owner", v.Owner.Name))
+				continue
 			}
+
+			slices.SortFunc(result.Dash.Video, func(a, b bilibili.AudioOrVideo) int {
+				return b.Bandwidth - a.Bandwidth
+			})
+			slices.SortFunc(result.Dash.Audio, func(a, b bilibili.AudioOrVideo) int {
+				return b.Bandwidth - a.Bandwidth
+			})
+
+			video := result.Dash.Video[0]
+			videoPath := filepath.Join(outputPath, newFileName(v.Owner.Name, v.Title, "video", video.MimeType))
+			err = downloadFile(client, videoPath, append([]string{video.BaseUrl}, video.BackupUrl...))
+			if err != nil {
+				return err
+			}
+
+			audio := result.Dash.Audio[0]
+			audioPath := filepath.Join(outputPath, newFileName(v.Owner.Name, v.Title, "audio", audio.MimeType))
+			err = downloadFile(client, audioPath, append([]string{audio.BaseUrl}, audio.BackupUrl...))
+			if err != nil {
+				return err
+			}
+
+			mergeList = append(mergeList, VideoAudioPair{
+				VideoPath:  videoPath,
+				AudioPath:  audioPath,
+				OutputPath: filepath.Join(outputPath, newFileName(v.Owner.Name, v.Title, "", "mp4")),
+			})
 		}
 
-		return client.ClearToView()
+		ffmpeg := FFmpeg{Path: command.String("ffmpeg")}
+		for _, m := range mergeList {
+			zap.L().Info("Merging", zap.String("output", filepath.Base(m.OutputPath)))
+			err = ffmpeg.MergeVideoAudio(m.VideoPath, m.AudioPath, m.OutputPath)
+			if err != nil {
+				return err
+			}
+			_ = os.Remove(m.VideoPath)
+			_ = os.Remove(m.AudioPath)
+		}
+
+		return nil
 	},
 }
 
@@ -108,33 +164,6 @@ func getContentLength(header http.Header) int64 {
 		return -1
 	}
 	return v
-}
-
-func newProgressBar(maxBytes int64, description string) *progressbar.ProgressBar {
-	return progressbar.NewOptions64(
-		maxBytes,
-		progressbar.OptionSetDescription(description),
-		progressbar.OptionSetWriter(ansi.NewAnsiStdout()),
-		progressbar.OptionEnableColorCodes(true),
-		progressbar.OptionSetWidth(15),
-		progressbar.OptionShowBytes(true),
-		progressbar.OptionShowTotalBytes(true),
-		progressbar.OptionThrottle(100*time.Millisecond),
-		progressbar.OptionShowCount(),
-		progressbar.OptionOnCompletion(func() {
-			_, _ = fmt.Fprint(os.Stderr, "\n")
-		}),
-		progressbar.OptionSpinnerType(14),
-		progressbar.OptionFullWidth(),
-		progressbar.OptionSetRenderBlankState(true),
-		progressbar.OptionSetTheme(progressbar.Theme{
-			Saucer:        "[green]=[reset]",
-			SaucerHead:    "[green]>[reset]",
-			SaucerPadding: " ",
-			BarStart:      "[",
-			BarEnd:        "]",
-		}),
-	)
 }
 
 func copyRestyClient(c *resty.Client) *resty.Client {
@@ -160,9 +189,9 @@ func downloadSingleFile(client *bilibili.Client, filePath string, url string) er
 	body := rsp.RawBody()
 	defer func() { _ = body.Close() }()
 
-	fmt.Printf("Downloading %s\n", fileName)
+	zap.L().Info("Downloading", zap.String("name", fileName))
 	contentLength := getContentLength(rsp.Header())
-	bar := newProgressBar(contentLength, "Downloading")
+	bar := newProgressBar(contentLength, "")
 	defer func() { _ = bar.Finish() }()
 
 	buf := make([]byte, 1*1024*1024)
@@ -243,46 +272,19 @@ func downloadFile(client *bilibili.Client, filePath string, urls []string) error
 	return errors.Newf("download %s failed", fileName)
 }
 
-func newName(author string, title string, order int, format string) string {
-	if strings.HasPrefix(format, "mp4") {
+func newFileName(author string, title string, suffix string, format string) string {
+	if strings.Contains(format, "mp4") {
 		format = "mp4"
+	} else if strings.Contains(format, "flv") {
+		format = "flv"
 	}
 
-	fileName := fmt.Sprintf("%s - %s_%d.%s", author, title, order, format)
-	fileName, err := filenamify.Filenamify(fileName, filenamify.Options{})
+	fileName := fmt.Sprintf("%s - %s_%s.%s", author, title, suffix, format)
+	fileName, err := filenamify.FilenamifyV2(fileName)
 	if err != nil {
 		panic(err)
 	}
 	return fileName
-}
-
-type Config struct {
-	Cookies string `yaml:"cookies"`
-}
-
-func LoadConfig(path string) (*Config, error) {
-	buf, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return &Config{}, nil
-		}
-		return nil, err
-	}
-
-	var config Config
-	err = yaml.Unmarshal(buf, &config)
-	if err != nil {
-		return nil, err
-	}
-	return &config, nil
-}
-
-func SaveConfig(path string, config *Config) error {
-	buf, err := yaml.Marshal(config)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(path, buf, 0644)
 }
 
 func Login(client *bilibili.Client) (string, error) {
@@ -302,4 +304,17 @@ func Login(client *bilibili.Client) (string, error) {
 
 	zap.L().Info("Login success")
 	return client.GetCookiesString(), nil
+}
+
+type FFmpeg struct {
+	Path string
+}
+
+func (f *FFmpeg) MergeVideoAudio(videoPath, audioPath, outputPath string) error {
+	cmd := exec.Command(f.Path, "-i", videoPath, "-i", audioPath, "-c:v", "copy", "-c:a", "copy", outputPath)
+	buf, err := cmd.CombinedOutput()
+	if err != nil {
+		return errors.Wrap(err, string(buf))
+	}
+	return nil
 }
