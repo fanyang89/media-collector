@@ -9,7 +9,6 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"github.com/fanyang89/media-collector/bilibili"
-	"github.com/fanyang89/media-collector/xhs"
 )
 
 var cmd = &cli.Command{
@@ -17,7 +16,6 @@ var cmd = &cli.Command{
 	Usage: "Media collector",
 	Commands: []*cli.Command{
 		bilibili.RootCmd,
-		xhs.RootCmd,
 	},
 }
 
