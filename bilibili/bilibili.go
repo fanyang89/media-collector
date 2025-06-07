@@ -183,8 +183,9 @@ func downloadSingleFile(client *bilibili.Client, filePath string, url string) er
 	body := rsp.RawBody()
 	defer func() { _ = body.Close() }()
 
+	_ = fmt.Sprintf("Downloading %s\n", fileName)
 	contentLength := getContentLength(rsp.Header())
-	bar := newProgressBar(contentLength, fmt.Sprintf("Downloading %s", fileName))
+	bar := newProgressBar(contentLength, "")
 	defer func() { _ = bar.Finish() }()
 
 	buf := make([]byte, 1*1024*1024)
