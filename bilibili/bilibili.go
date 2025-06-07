@@ -37,9 +37,42 @@ func defaultExecutableFileExtension() string {
 	return ""
 }
 
-var RootCmd = &cli.Command{
-	Name:    "bilibili",
-	Aliases: []string{"bili", "b"},
+var loginCmd = &cli.Command{
+	Name: "login",
+	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:    "config",
+			Aliases: []string{"c"},
+			Value:   "config.yml",
+		},
+	},
+	Action: func(ctx context.Context, command *cli.Command) error {
+		configPath := command.String("config")
+		config, err := LoadConfig(configPath)
+		if err != nil {
+			return err
+		}
+
+		client := bilibili.New()
+		cookies, err := Login(client)
+		if err != nil {
+			return err
+		}
+
+		config.Cookies = cookies
+		return SaveConfig(configPath, config)
+	},
+}
+
+var downloadCmd = &cli.Command{
+	Name: "download",
+	Commands: []*cli.Command{
+		downloadToViewCmd,
+	},
+}
+
+var downloadToViewCmd = &cli.Command{
+	Name: "to-view",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:    "config",
@@ -57,8 +90,14 @@ var RootCmd = &cli.Command{
 		},
 	},
 	Action: func(ctx context.Context, command *cli.Command) error {
+		ffmpegPath := command.String("ffmpeg")
+		_, err := os.Stat(ffmpegPath)
+		if err != nil {
+			return errors.Wrap(err, "ffmpeg not exist, please install ffmpeg first")
+		}
+
 		outputPath := command.String("output")
-		_, err := os.Stat(outputPath)
+		_, err = os.Stat(outputPath)
 		if err != nil && os.IsNotExist(err) {
 			err = os.Mkdir(outputPath, 0755)
 			if err != nil {
@@ -142,7 +181,7 @@ var RootCmd = &cli.Command{
 			})
 		}
 
-		ffmpeg := FFmpeg{Path: command.String("ffmpeg")}
+		ffmpeg := FFmpeg{Path: ffmpegPath}
 		for _, m := range mergeList {
 			zap.L().Info("Merging", zap.String("output", filepath.Base(m.OutputPath)))
 			err = ffmpeg.MergeVideoAudio(m.VideoPath, m.AudioPath, m.OutputPath)
@@ -154,6 +193,15 @@ var RootCmd = &cli.Command{
 		}
 
 		return nil
+	},
+}
+
+var RootCmd = &cli.Command{
+	Name:    "bilibili",
+	Aliases: []string{"bili", "b"},
+	Commands: []*cli.Command{
+		loginCmd,
+		downloadCmd,
 	},
 }
 
@@ -278,8 +326,11 @@ func newFileName(author string, title string, suffix string, format string) stri
 	} else if strings.Contains(format, "flv") {
 		format = "flv"
 	}
+	if suffix != "" {
+		suffix = "_" + suffix
+	}
 
-	fileName := fmt.Sprintf("%s - %s_%s.%s", author, title, suffix, format)
+	fileName := fmt.Sprintf("%s - %s%s.%s", author, title, suffix, format)
 	fileName, err := filenamify.FilenamifyV2(fileName)
 	if err != nil {
 		panic(err)
