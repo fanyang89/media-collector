@@ -167,7 +167,8 @@ func (d *downloader) Download(option DownloadOption, force bool) error {
 	ffmpeg := d.ffmpeg
 	err = ffmpeg.MergeVideoAudio(videoPath, audioPath, filepath.Join(d.outputPath, outputFile))
 	if err != nil {
-		return err
+		zap.L().Error("Merge failed", zap.Error(err), zap.String("file", outputFile))
+		return nil
 	}
 	_ = os.Remove(videoPath)
 	_ = os.Remove(audioPath)
