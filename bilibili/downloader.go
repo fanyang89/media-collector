@@ -150,14 +150,14 @@ func (d *downloader) Download(option DownloadOption, force bool) error {
 
 	video := result.Dash.Video[0]
 	videoPath := filepath.Join(d.outputPath, newFileName(option.OwnerName, option.Title, "video", video.MimeType))
-	err = downloadFile(d.GetClient(), videoPath, append([]string{video.BaseUrl}, video.BackupUrl...))
+	err = d.downloadFile(videoPath, append([]string{video.BaseUrl}, video.BackupUrl...))
 	if err != nil {
 		return err
 	}
 
 	audio := result.Dash.Audio[0]
 	audioPath := filepath.Join(d.outputPath, newFileName(option.OwnerName, option.Title, "audio", audio.MimeType))
-	err = downloadFile(d.GetClient(), audioPath, append([]string{audio.BaseUrl}, audio.BackupUrl...))
+	err = d.downloadFile(audioPath, append([]string{audio.BaseUrl}, audio.BackupUrl...))
 	if err != nil {
 		return err
 	}

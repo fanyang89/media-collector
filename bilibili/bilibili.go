@@ -169,7 +169,7 @@ func copyRestyClient(c *resty.Client) *resty.Client {
 	return &cc
 }
 
-func downloadSingleFile(client *bilibili.Client, filePath string, url string) error {
+func (d *downloader) downloadSingleFile(filePath string, url string) error {
 	fileName := filepath.Base(filePath)
 	f, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
@@ -177,6 +177,7 @@ func downloadSingleFile(client *bilibili.Client, filePath string, url string) er
 	}
 	defer func() { _ = f.Close() }()
 
+	client := d.GetClient()
 	c := copyRestyClient(client.Resty())
 	c.SetTimeout(20 * time.Minute)
 
@@ -189,6 +190,11 @@ func downloadSingleFile(client *bilibili.Client, filePath string, url string) er
 
 	_ = fmt.Sprintf("Downloading %s\n", fileName)
 	contentLength := getContentLength(rsp.Header())
+	if contentLength >= d.config.MaxFileSize {
+		zap.L().Warn("Skip large file", zap.String("file", fileName))
+		return nil
+	}
+
 	bar := newProgressBar(contentLength, "")
 	defer func() { _ = bar.Finish() }()
 
@@ -229,14 +235,14 @@ func readWithContext(ctx context.Context, r io.Reader, buf []byte) (n int, err e
 	}
 }
 
-func downloadFile(client *bilibili.Client, filePath string, urls []string) error {
+func (d *downloader) downloadFile(filePath string, urls []string) error {
 	if len(urls) == 0 {
 		return errors.New("urls is empty")
 	}
 
 	if len(urls) > 1 {
 		for _, url := range urls {
-			err := downloadSingleFile(client, filePath, url)
+			err := d.downloadSingleFile(filePath, url)
 			if err != nil {
 				zap.L().Error("Download file failed, try next URL", zap.Error(err))
 				continue
@@ -251,7 +257,7 @@ func downloadFile(client *bilibili.Client, filePath string, urls []string) error
 		const tryInterval = time.Second
 		for tryCnt < maxTryCnt {
 			tryCnt++
-			err := downloadSingleFile(client, filePath, urls[0])
+			err := d.downloadSingleFile(filePath, urls[0])
 			if err != nil {
 				zap.L().Error("Download file failed, try again later", zap.Error(err))
 				time.Sleep(tryInterval)
