@@ -1,0 +1,3 @@
+[submodule "sdk/bilibili"]
+	path = sdk/bilibili
+	url = https://github.com/fanyang89/bilibili.git

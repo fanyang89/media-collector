@@ -2,3 +2,4 @@
 output/
 config.yml
 config-xhs.yml
+*.db
