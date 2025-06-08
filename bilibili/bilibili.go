@@ -169,6 +169,8 @@ func copyRestyClient(c *resty.Client) *resty.Client {
 	return &cc
 }
 
+var ErrFileTooLarge = errors.New("file too large")
+
 func (d *downloader) downloadSingleFile(filePath string, url string) error {
 	fileName := filepath.Base(filePath)
 	f, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
@@ -191,8 +193,7 @@ func (d *downloader) downloadSingleFile(filePath string, url string) error {
 	fmt.Printf("Downloading %s\n", fileName)
 	contentLength := getContentLength(rsp.Header())
 	if d.maxFileSize > 0 && contentLength >= d.maxFileSize {
-		zap.L().Warn("Skip large file", zap.String("file", fileName))
-		return nil
+		return errors.Wrapf(ErrFileTooLarge, "file: %s", fileName)
 	}
 
 	bar := newProgressBar(contentLength, "")
@@ -244,6 +245,9 @@ func (d *downloader) downloadFile(filePath string, urls []string) error {
 		for _, url := range urls {
 			err := d.downloadSingleFile(filePath, url)
 			if err != nil {
+				if errors.Is(err, ErrFileTooLarge) {
+					return err
+				}
 				zap.L().Error("Download file failed, try next URL", zap.Error(err))
 				continue
 			}
@@ -259,6 +263,9 @@ func (d *downloader) downloadFile(filePath string, urls []string) error {
 			tryCnt++
 			err := d.downloadSingleFile(filePath, urls[0])
 			if err != nil {
+				if errors.Is(err, ErrFileTooLarge) {
+					return err
+				}
 				zap.L().Error("Download file failed, try again later", zap.Error(err))
 				time.Sleep(tryInterval)
 			} else {
