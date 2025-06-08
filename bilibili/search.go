@@ -35,6 +35,10 @@ var downloadSearchCmd = &cli.Command{
 			Name:  "max-duration",
 			Value: time.Hour,
 		},
+		&cli.Int64Flag{
+			Name:  "max-file-size",
+			Value: 1 << 30,
+		},
 	},
 	Action: func(ctx context.Context, command *cli.Command) error {
 		maxDuration := command.Duration("max-duration")
@@ -47,6 +51,7 @@ var downloadSearchCmd = &cli.Command{
 		if err != nil {
 			return err
 		}
+		d.maxFileSize = command.Int64("max-file-size")
 
 		maxItems := command.Int("max-items")
 		results := make([]*VideoSearchResult, 0)

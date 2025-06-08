@@ -2,6 +2,7 @@ package bilibili
 
 import (
 	"context"
+	"fmt"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -25,6 +26,7 @@ type downloader struct {
 	config      *Config
 	history     *History
 	rateLimiter *rate.Limiter
+	maxFileSize int64
 }
 
 func downloaderFromCliCommand(command *cli.Command) (*downloader, error) {
@@ -163,7 +165,7 @@ func (d *downloader) Download(option DownloadOption, force bool) error {
 	}
 
 	outputFile := getFileName(option, nil, Video)
-	zap.L().Info("Merging", zap.String("output", outputFile))
+	fmt.Printf("Merging %s\n", outputFile)
 	ffmpeg := d.ffmpeg
 	err = ffmpeg.MergeVideoAudio(videoPath, audioPath, filepath.Join(d.outputPath, outputFile))
 	if err != nil {

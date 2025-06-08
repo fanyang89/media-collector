@@ -8,20 +8,18 @@ import (
 )
 
 type Config struct {
-	Cookies     string `yaml:"cookies"`
-	Output      string `yaml:"output"`
-	FFmpeg      string `yaml:"ffmpeg"`
-	HistoryDB   string `yaml:"history_db"`
-	MaxFileSize int64  `yaml:"max_file_size"`
+	Cookies   string `yaml:"cookies"`
+	Output    string `yaml:"output"`
+	FFmpeg    string `yaml:"ffmpeg"`
+	HistoryDB string `yaml:"history_db"`
 }
 
 func defaultConfig() *Config {
 	return &Config{
-		Cookies:     "",
-		Output:      "./output",
-		FFmpeg:      "ffmpeg" + defaultExecutableFileExtension(),
-		HistoryDB:   "./media-collector.db",
-		MaxFileSize: 1 * 1024 * 1024 * 1024,
+		Cookies:   "",
+		Output:    "./output",
+		FFmpeg:    "ffmpeg" + defaultExecutableFileExtension(),
+		HistoryDB: "./media-collector.db",
 	}
 }
 
