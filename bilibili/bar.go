@@ -15,7 +15,6 @@ func newProgressBar(maxBytes int64, description string) *progressbar.ProgressBar
 		progressbar.OptionSetDescription(description),
 		progressbar.OptionSetWriter(ansi.NewAnsiStdout()),
 		progressbar.OptionEnableColorCodes(true),
-		progressbar.OptionSetWidth(15),
 		progressbar.OptionShowBytes(true),
 		progressbar.OptionShowTotalBytes(true),
 		progressbar.OptionThrottle(100*time.Millisecond),

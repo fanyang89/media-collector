@@ -137,7 +137,8 @@ var downloadToViewCmd = &cli.Command{
 				Title:     v.Title,
 			}, false)
 			if err != nil {
-				return err
+				zap.L().Error("Download failed", zap.String("bvid", v.Bvid), zap.Error(err))
+				continue
 			}
 		}
 

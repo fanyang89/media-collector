@@ -107,12 +107,13 @@ func getFileName(option DownloadOption, videoOrAudio *bilibili.AudioOrVideo, str
 }
 
 type DownloadOption struct {
-	Bvid          string
-	Cid           int
-	OwnerName     string
-	Title         string
-	SearchKeyword string
-	Tags          []string
+	Bvid             string
+	Cid              int
+	OwnerName        string
+	Title            string
+	SearchKeyword    string
+	Tags             []string
+	DownloadProgress string
 }
 
 func (d *downloader) Download(option DownloadOption, force bool) error {
@@ -121,7 +122,7 @@ func (d *downloader) Download(option DownloadOption, force bool) error {
 		return err
 	}
 	if ok && !force {
-		zap.L().Info("Skip download", zap.String("bvid", option.Bvid),
+		zap.L().Info("Already downloaded", zap.String("bvid", option.Bvid),
 			zap.String("owner", option.OwnerName), zap.String("title", option.Title))
 		return nil
 	}
@@ -137,7 +138,7 @@ func (d *downloader) Download(option DownloadOption, force bool) error {
 
 	result, err := d.GetClient().GetVideoStream(newGetVideoStreamParam(option.Bvid, option.Cid))
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "get video stream, bvid: %s, cid: %d", option.Bvid, option.Cid)
 	}
 	if len(result.Dash.Video) == 0 || len(result.Dash.Audio) == 0 {
 		if result.Result == "suee" {
@@ -165,7 +166,11 @@ func (d *downloader) Download(option DownloadOption, force bool) error {
 	}
 
 	outputFile := getFileName(option, nil, Video)
-	fmt.Printf("Merging %s\n", outputFile)
+	if option.DownloadProgress != "" {
+		fmt.Printf("%s Merging %s\n", option.DownloadProgress, outputFile)
+	} else {
+		fmt.Printf("Merging %s\n", outputFile)
+	}
 	ffmpeg := d.ffmpeg
 	err = ffmpeg.MergeVideoAudio(videoPath, audioPath, filepath.Join(d.outputPath, outputFile))
 	if err != nil {

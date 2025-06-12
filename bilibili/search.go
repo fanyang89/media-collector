@@ -2,6 +2,7 @@ package bilibili
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -107,13 +108,14 @@ var downloadSearchCmd = &cli.Command{
 
 		zap.L().Info("Search completed", zap.Int("results", len(results)))
 
-		for _, r := range results {
+		for i, r := range results {
 			err = d.Download(DownloadOption{
-				Bvid:          r.Bvid,
-				OwnerName:     r.Author,
-				Title:         r.Title,
-				SearchKeyword: keyword,
-				Tags:          r.Tags,
+				Bvid:             r.Bvid,
+				OwnerName:        r.Author,
+				Title:            r.Title,
+				SearchKeyword:    keyword,
+				Tags:             r.Tags,
+				DownloadProgress: fmt.Sprintf("(%d/%d)", i+1, len(results)),
 			}, false)
 			if err != nil {
 				zap.L().Error("Download failed", zap.String("bvid", r.Bvid), zap.Error(err))
