@@ -89,7 +89,7 @@ func convertAidToBvid(aid int) string {
 	return string(l)
 }
 
-func newGetVideoStreamParam(bvid string, cid int) bilibili.GetVideoStreamParam {
+func NewGetVideoStreamParam(bvid string, cid int) bilibili.GetVideoStreamParam {
 	return bilibili.GetVideoStreamParam{
 		Bvid:     bvid,
 		Cid:      cid,
@@ -135,7 +135,7 @@ var downloadToViewCmd = &cli.Command{
 				Cid:       v.Cid,
 				OwnerName: v.Owner.Name,
 				Title:     v.Title,
-			}, false)
+			}, false, true)
 			if err != nil {
 				zap.L().Error("Download failed", zap.String("bvid", v.Bvid), zap.Error(err))
 				continue
@@ -172,7 +172,7 @@ func copyRestyClient(c *resty.Client) *resty.Client {
 
 var ErrFileTooLarge = errors.New("file too large")
 
-func (d *downloader) downloadSingleFile(filePath string, url string) error {
+func (d *Downloader) downloadSingleFile(filePath string, url string) error {
 	fileName := filepath.Base(filePath)
 	f, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
@@ -197,7 +197,7 @@ func (d *downloader) downloadSingleFile(filePath string, url string) error {
 		return errors.Wrapf(ErrFileTooLarge, "file: %s", fileName)
 	}
 
-	bar := newProgressBar(contentLength, "")
+	bar := NewProgressBar(contentLength, "")
 	defer func() { _ = bar.Finish() }()
 
 	buf := make([]byte, 1*1024*1024)
@@ -237,7 +237,7 @@ func readWithContext(ctx context.Context, r io.Reader, buf []byte) (n int, err e
 	}
 }
 
-func (d *downloader) downloadFile(filePath string, urls []string) error {
+func (d *Downloader) DownloadFile(filePath string, urls []string) error {
 	if len(urls) == 0 {
 		return errors.New("urls is empty")
 	}

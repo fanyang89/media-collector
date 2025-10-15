@@ -9,7 +9,7 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
-func newProgressBar(maxBytes int64, description string) *progressbar.ProgressBar {
+func NewProgressBar(maxBytes int64, description string) *progressbar.ProgressBar {
 	return progressbar.NewOptions64(
 		maxBytes,
 		progressbar.OptionSetDescription(description),

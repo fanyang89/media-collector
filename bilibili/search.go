@@ -116,7 +116,7 @@ var downloadSearchCmd = &cli.Command{
 				SearchKeyword:    keyword,
 				Tags:             r.Tags,
 				DownloadProgress: fmt.Sprintf("(%d/%d)", i+1, len(results)),
-			}, false)
+			}, false, true)
 			if err != nil {
 				zap.L().Error("Download failed", zap.String("bvid", r.Bvid), zap.Error(err))
 				continue

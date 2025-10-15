@@ -52,6 +52,6 @@ var downloadSingleCmd = &cli.Command{
 			Cid:       videoInfo.Cid,
 			OwnerName: videoInfo.Owner.Name,
 			Title:     videoInfo.Title,
-		}, false)
+		}, false, true)
 	},
 }

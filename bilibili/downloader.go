@@ -3,6 +3,7 @@ package bilibili
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -18,7 +19,7 @@ import (
 	"github.com/CuteReimu/bilibili/v2"
 )
 
-type downloader struct {
+type Downloader struct {
 	ffmpeg      FFmpeg
 	outputPath  string
 	client      *bilibili.Client
@@ -29,11 +30,23 @@ type downloader struct {
 	maxFileSize int64
 }
 
-func downloaderFromCliCommand(command *cli.Command) (*downloader, error) {
+func downloaderFromCliCommand(command *cli.Command) (*Downloader, error) {
 	return newDownloader(command.String("config"))
 }
 
-func newDownloader(configPath string) (*downloader, error) {
+func NewDownloaderFromConfig(config *Config) *Downloader {
+	b := bilibili.New()
+	b.SetCookiesString(config.Cookies)
+	return &Downloader{
+		config:      config,
+		ffmpeg:      FFmpeg{Path: config.FFmpeg},
+		outputPath:  config.Output,
+		rateLimiter: rate.NewLimiter(rate.Every(time.Second), 1),
+		client:      b,
+	}
+}
+
+func newDownloader(configPath string) (*Downloader, error) {
 	config, err := LoadConfig(configPath)
 	if err != nil {
 		return nil, err
@@ -41,7 +54,7 @@ func newDownloader(configPath string) (*downloader, error) {
 	if config.Cookies == "" {
 		return nil, errors.New("please login first")
 	}
-	d := &downloader{
+	d := &Downloader{
 		configPath: configPath,
 		config:     config,
 	}
@@ -76,11 +89,11 @@ func newDownloader(configPath string) (*downloader, error) {
 	return d, nil
 }
 
-func (d *downloader) GetVideoInfo(bvid string) (*bilibili.VideoInfo, error) {
+func (d *Downloader) GetVideoInfo(bvid string) (*bilibili.VideoInfo, error) {
 	return d.GetClient().GetVideoInfo(bilibili.VideoParam{Bvid: bvid})
 }
 
-func (d *downloader) GetClient() *bilibili.Client {
+func (d *Downloader) GetClient() *bilibili.Client {
 	_ = d.rateLimiter.Wait(context.Background())
 	time.Sleep(time.Duration(rand.IntN(3)+1) * time.Second)
 	return d.client
@@ -116,16 +129,32 @@ type DownloadOption struct {
 	DownloadProgress string
 }
 
-func (d *downloader) Download(option DownloadOption, force bool) error {
-	ok, err := d.history.IsDownloaded(option.Bvid)
-	if err != nil {
-		return err
+func fileExists(filePath string) bool {
+	_, err := os.Stat(filePath)
+	if err == nil {
+		return true
 	}
-	if ok && !force {
-		zap.L().Info("Already downloaded", zap.String("bvid", option.Bvid),
-			zap.String("owner", option.OwnerName), zap.String("title", option.Title))
-		return nil
+	if os.IsNotExist(err) {
+		return false
 	}
+	slog.Error("failed to check if file exists", zap.String("filePath", filePath))
+	return false
+}
+
+func (d *Downloader) Download(option DownloadOption, force bool, saveHistory bool) error {
+	if !force {
+		ok, err := d.history.IsDownloaded(option.Bvid)
+		if err != nil {
+			return err
+		}
+		if ok {
+			zap.L().Info("Already downloaded", zap.String("bvid", option.Bvid),
+				zap.String("owner", option.OwnerName), zap.String("title", option.Title))
+			return nil
+		}
+	}
+
+	var err error
 
 	if option.Cid == 0 {
 		var videoInfo *bilibili.VideoInfo
@@ -136,7 +165,7 @@ func (d *downloader) Download(option DownloadOption, force bool) error {
 		option.Cid = videoInfo.Cid
 	}
 
-	result, err := d.GetClient().GetVideoStream(newGetVideoStreamParam(option.Bvid, option.Cid))
+	result, err := d.GetClient().GetVideoStream(NewGetVideoStreamParam(option.Bvid, option.Cid))
 	if err != nil {
 		return errors.Wrapf(err, "get video stream, bvid: %s, cid: %d", option.Bvid, option.Cid)
 	}
@@ -151,46 +180,60 @@ func (d *downloader) Download(option DownloadOption, force bool) error {
 	slices.SortFunc(result.Dash.Video, func(a, b bilibili.AudioOrVideo) int { return b.Bandwidth - a.Bandwidth })
 	slices.SortFunc(result.Dash.Audio, func(a, b bilibili.AudioOrVideo) int { return b.Bandwidth - a.Bandwidth })
 
+	outputFile := getFileName(option, nil, Video)
+	dstFilePath := filepath.Join(d.outputPath, outputFile)
+	if fileExists(dstFilePath) {
+		slog.Info("Skip download", "fileName", outputFile)
+		return nil
+	}
+
 	video := result.Dash.Video[0]
 	videoPath := filepath.Join(d.outputPath, newFileName(option.OwnerName, option.Title, "video", video.MimeType))
-	err = d.downloadFile(videoPath, append([]string{video.BaseUrl}, video.BackupUrl...))
+
+	err = d.DownloadFile(videoPath, append([]string{video.BaseUrl}, video.BackupUrl...))
 	if err != nil {
 		return err
 	}
 
 	audio := result.Dash.Audio[0]
 	audioPath := filepath.Join(d.outputPath, newFileName(option.OwnerName, option.Title, "audio", audio.MimeType))
-	err = d.downloadFile(audioPath, append([]string{audio.BaseUrl}, audio.BackupUrl...))
+
+	err = d.DownloadFile(audioPath, append([]string{audio.BaseUrl}, audio.BackupUrl...))
 	if err != nil {
 		return err
 	}
 
-	outputFile := getFileName(option, nil, Video)
 	if option.DownloadProgress != "" {
 		fmt.Printf("%s Merging %s\n", option.DownloadProgress, outputFile)
 	} else {
 		fmt.Printf("Merging %s\n", outputFile)
 	}
+
 	ffmpeg := d.ffmpeg
 	err = ffmpeg.MergeVideoAudio(videoPath, audioPath, filepath.Join(d.outputPath, outputFile))
 	if err != nil {
 		zap.L().Error("Merge failed", zap.Error(err), zap.String("file", outputFile))
 		return nil
 	}
+
 	_ = os.Remove(videoPath)
 	_ = os.Remove(audioPath)
 
-	return d.history.Save(&HistoryEntry{
-		Bvid:     option.Bvid,
-		Author:   option.OwnerName,
-		Title:    option.Title,
-		Keyword:  option.SearchKeyword,
-		Tags:     strings.Join(option.Tags, ";"),
-		FileName: outputFile,
-	})
+	if saveHistory {
+		return d.history.Save(&HistoryEntry{
+			Bvid:     option.Bvid,
+			Author:   option.OwnerName,
+			Title:    option.Title,
+			Keyword:  option.SearchKeyword,
+			Tags:     strings.Join(option.Tags, ";"),
+			FileName: outputFile,
+		})
+	}
+
+	return nil
 }
 
-func (d *downloader) SaveConfig() error {
+func (d *Downloader) SaveConfig() error {
 	cookies := d.client.GetCookiesString()
 	d.config.Cookies = cookies
 	return SaveConfig(d.configPath, d.config)
